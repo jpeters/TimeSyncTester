@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 
 namespace TimeSyncTester
 {
@@ -11,15 +8,24 @@ namespace TimeSyncTester
     {
         static void Main(string[] args)
         {
-            double seconds = (GetNetworkTime() - DateTime.Now).TotalSeconds;
-            seconds = Math.Round(Math.Abs(seconds));
-            Console.WriteLine(seconds);
+            DateTime? networkTime = GetNetworkTime();
+            DateTime timeRightNow = DateTime.Now;
+            if (networkTime.HasValue)
+            {
+                double seconds = (networkTime.Value - timeRightNow).TotalSeconds;
+                seconds = Math.Round(Math.Abs(seconds));
+                Console.WriteLine(seconds);
+            }
+            else
+            {
+                Console.WriteLine("-1");
+            }
         }
 
-        public static DateTime GetNetworkTime()
+        public static DateTime? GetNetworkTime()
         {
             //default Windows time server
-            const string ntpServer = "time.windows.com";
+            const string ntpServer = "pool.ntp.org";
 
             // NTP message size - 16 bytes of the digest (RFC 2030)
             var ntpData = new byte[48];
@@ -27,42 +33,61 @@ namespace TimeSyncTester
             //Setting the Leap Indicator, Version Number and Mode values
             ntpData[0] = 0x1B; //LI = 0 (no warning), VN = 3 (IPv4 only), Mode = 3 (Client Mode)
 
-            var addresses = Dns.GetHostEntry(ntpServer).AddressList;
+            IPAddress[] addresses = null;
 
-            //The UDP port number assigned to NTP is 123
-            var ipEndPoint = new IPEndPoint(addresses[0], 123);
-            //NTP uses UDP
-            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                addresses = Dns.GetHostEntry(ntpServer).AddressList;
+            }
+            catch (Exception exc)
+            { }
 
-            socket.Connect(ipEndPoint);
+            if (addresses != null && addresses.Length > 0)
+            {
 
-            //Stops code hang if NTP is blocked
-            socket.ReceiveTimeout = 3000;
+                //The UDP port number assigned to NTP is 123
+                var ipEndPoint = new IPEndPoint(addresses[0], 123);
+                //NTP uses UDP
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
 
-            socket.Send(ntpData);
-            socket.Receive(ntpData);
-            socket.Close();
+                try
+                {
+                    socket.Connect(ipEndPoint);
 
-            //Offset to get to the "Transmit Timestamp" field (time at which the reply 
-            //departed the server for the client, in 64-bit timestamp format."
-            const byte serverReplyTime = 40;
+                    //Stops code hang if NTP is blocked
+                    socket.ReceiveTimeout = 3000;
 
-            //Get the seconds part
-            ulong intPart = BitConverter.ToUInt32(ntpData, serverReplyTime);
+                    socket.Send(ntpData);
+                    socket.Receive(ntpData);
+                    socket.Close();
+                }
+                catch (Exception exc) { }
 
-            //Get the seconds fraction
-            ulong fractPart = BitConverter.ToUInt32(ntpData, serverReplyTime + 4);
+                //Offset to get to the "Transmit Timestamp" field (time at which the reply 
+                //departed the server for the client, in 64-bit timestamp format."
+                const byte serverReplyTime = 40;
 
-            //Convert From big-endian to little-endian
-            intPart = SwapEndianness(intPart);
-            fractPart = SwapEndianness(fractPart);
+                //Get the seconds part
+                ulong intPart = BitConverter.ToUInt32(ntpData, serverReplyTime);
 
-            var milliseconds = (intPart * 1000) + ((fractPart * 1000) / 0x100000000L);
+                //Get the seconds fraction
+                ulong fractPart = BitConverter.ToUInt32(ntpData, serverReplyTime + 4);
 
-            //**UTC** time
-            var networkDateTime = (new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc)).AddMilliseconds((long)milliseconds);
+                //Convert From big-endian to little-endian
+                intPart = SwapEndianness(intPart);
+                fractPart = SwapEndianness(fractPart);
 
-            return networkDateTime.ToLocalTime();
+                var milliseconds = (intPart * 1000) + ((fractPart * 1000) / 0x100000000L);
+
+                //**UTC** time
+                var networkDateTime = (new DateTime(1900, 1, 1, 0, 0, 0, DateTimeKind.Utc)).AddMilliseconds((long)milliseconds);
+
+                return networkDateTime.ToLocalTime();
+            }
+            else
+            {
+                return null;
+            }
         }
 
         // stackoverflow.com/a/3294698/162671

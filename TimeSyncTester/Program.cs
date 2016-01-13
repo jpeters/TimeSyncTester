@@ -61,7 +61,10 @@ namespace TimeSyncTester
                     socket.Receive(ntpData);
                     socket.Close();
                 }
-                catch (Exception exc) { }
+                catch (Exception exc)
+                {
+                    return null;
+                }
 
                 //Offset to get to the "Transmit Timestamp" field (time at which the reply 
                 //departed the server for the client, in 64-bit timestamp format."
